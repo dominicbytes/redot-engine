@@ -1,5 +1,6 @@
 default_language_version:
   python: python3
+  node: "26.8.1"
 
 exclude: |
   (?x)^(
@@ -55,7 +56,7 @@ repos:
     rev: v2.4.1
     hooks:
       - id: codespell
-        additional_dependencies: [tomli]
+        additional_dependencies: [tomli==2.4.1]
 
       - id: codespell
         name: codespell-redot-docs
@@ -138,14 +139,14 @@ repos:
           - --config
           - platform/web/eslint.config.cjs
         additional_dependencies:
-          - "@eslint/js@^9.3.0"
-          - "@html-eslint/eslint-plugin@^0.24.1"
-          - "@html-eslint/parser@^0.24.1"
-          - "@stylistic/eslint-plugin@^2.1.0"
-          - eslint@^9.3.0
-          - eslint-plugin-html@^8.1.1
-          - globals@^15.3.0
-          - espree@^10.0.1
+          - "@eslint/js@9.3.0"
+          - "@html-eslint/eslint-plugin@0.24.1"
+          - "@html-eslint/parser@0.24.1"
+          - "@stylistic/eslint-plugin@2.1.0"
+          - eslint@9.3.0
+          - eslint-plugin-html@8.1.1
+          - globals@15.3.0
+          - espree@10.0.1
 
       - id: jsdoc
         name: jsdoc
@@ -163,7 +164,7 @@ repos:
           - -d
           - dry-run
         pass_filenames: false
-        additional_dependencies: [jsdoc@^4.0.3]
+        additional_dependencies: [jsdoc@4.0.3]
 
       - id: svgo
         name: svgo
