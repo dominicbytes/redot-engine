@@ -7,6 +7,11 @@ permissions:
   contents: read
 
 jobs:
+  production-workflow:
+    uses: ./.github/workflows/static_checks.yml
+    with:
+      all_files: true
+
   linux:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -14,8 +19,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - label: base
-            ref: 94cb3adff9a5ad3656e6ac790568a82f16a62bd6
           - label: candidate
             ref: sandbox/lint-validation
     steps:
@@ -28,7 +31,7 @@ jobs:
         run: bash misc/scripts/gitignore_check.sh
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
+          python-version: "3.11.16"
       - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: "8.0.x"
@@ -68,18 +71,32 @@ jobs:
         env:
           LABEL: ${{ matrix.label }}
         run: |
-          set +e
-          if [ "$LABEL" = candidate ]; then
-            LINT_ALL_FILES=true python misc/scripts/ci_lint.py 2>&1 | tee "$RUNNER_TEMP/lint-evidence/full-hooks.log"
-          else
-            python -m pre_commit run --all-files --show-diff-on-failure 2>&1 | tee "$RUNNER_TEMP/lint-evidence/full-hooks.log"
-          fi
-          result=${PIPESTATUS[0]}
-          set -e
-          printf '%s\n' "$result" > "$RUNNER_TEMP/lint-evidence/hook-exit.txt"
-          git diff --binary > "$RUNNER_TEMP/lint-evidence/changes.patch"
-          git status --short > "$RUNNER_TEMP/lint-evidence/status.txt"
-          exit "$result"
+          for pass in 1 2; do
+            set +e
+            LINT_ALL_FILES=true python misc/scripts/ci_lint.py 2>&1 | tee "$RUNNER_TEMP/lint-evidence/full-hooks-$pass.log"
+            result=${PIPESTATUS[0]}
+            set -e
+            printf '%s\n' "$result" > "$RUNNER_TEMP/lint-evidence/hook-exit-$pass.txt"
+            git diff --binary > "$RUNNER_TEMP/lint-evidence/changes-$pass.patch"
+            git status --short > "$RUNNER_TEMP/lint-evidence/status-$pass.txt"
+            if [ "$result" -ne 0 ]; then exit "$result"; fi
+            git diff --exit-code
+          done
+      - name: Record resolved Node packages
+        if: always()
+        run: |
+          python - <<'PY' > "$RUNNER_TEMP/lint-evidence/node-packages.json"
+          import json
+          from pathlib import Path
+          packages = []
+          for environment in (Path.home() / '.cache/pre-commit').glob('repo*/node_env-*'):
+              root = environment / 'lib/node_modules'
+              for pattern in ('*/package.json', '@*/*/package.json'):
+                  for path in root.glob(pattern):
+                      package = json.loads(path.read_text())
+                      packages.append({'name': package['name'], 'version': package['version']})
+          print(json.dumps(packages, indent=2))
+          PY
       - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@v4
