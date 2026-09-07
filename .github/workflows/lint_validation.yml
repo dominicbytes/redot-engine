@@ -1,0 +1,89 @@
+name: Lint contribution validation (fork only)
+on:
+  push:
+    branches: [sandbox/lint-validation]
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: base
+            ref: 94cb3adff9a5ad3656e6ac790568a82f16a62bd6
+          - label: candidate
+            ref: sandbox/lint-validation
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ matrix.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Original gitignore check
+        run: bash misc/scripts/gitignore_check.sh
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "8.0.x"
+      - uses: actions/cache@v5
+        with:
+          path: ~/.cache/pre-commit
+          key: lint-validation-${{ runner.os }}-${{ runner.arch }}-py311-pc462-${{ hashFiles('.pre-commit-config.yaml') }}
+      - name: Install validation tools
+        run: |
+          python -m pip install pre-commit==4.6.2
+          sudo apt-get update -qq
+          sudo apt-get install -y libxml2-utils
+          mkdir -p "$RUNNER_TEMP/lint-evidence"
+          git rev-parse HEAD > "$RUNNER_TEMP/lint-evidence/head.txt"
+          python --version > "$RUNNER_TEMP/lint-evidence/python.txt"
+          python -m pip freeze > "$RUNNER_TEMP/lint-evidence/python-packages.txt"
+          dotnet --info > "$RUNNER_TEMP/lint-evidence/dotnet.txt"
+      - name: Regression tests
+        if: matrix.label == 'candidate'
+        run: |
+          python tests/python_build/test_ci_lint.py 2>&1 | tee "$RUNNER_TEMP/lint-evidence/ci-tests.log"
+          python tests/python_build/test_dotnet_format.py 2>&1 | tee "$RUNNER_TEMP/lint-evidence/dotnet-tests.log"
+      - name: Real dotnet formatter smoke test
+        if: matrix.label == 'candidate'
+        run: |
+          source_script="$PWD/misc/scripts/dotnet_format.py"
+          mkdir -p "$RUNNER_TEMP/dotnet-smoke"
+          cd "$RUNNER_TEMP/dotnet-smoke"
+          dotnet new classlib -o 'project with spaces' --framework net8.0
+          python "$source_script" 'project with spaces/Class1.cs'
+          dotnet format 'project with spaces' --verify-no-changes
+      - name: XML and C interface validation
+        run: |
+          xmllint --quiet --noout --schema doc/class.xsd doc/classes/*.xml modules/*/doc_classes/*.xml platform/*/doc_classes/*.xml
+          gcc -c core/extension/gdextension_interface.h
+      - name: Full automatic hook inventory
+        env:
+          LABEL: ${{ matrix.label }}
+        run: |
+          set +e
+          if [ "$LABEL" = candidate ]; then
+            LINT_ALL_FILES=true python misc/scripts/ci_lint.py 2>&1 | tee "$RUNNER_TEMP/lint-evidence/full-hooks.log"
+          else
+            python -m pre_commit run --all-files --show-diff-on-failure 2>&1 | tee "$RUNNER_TEMP/lint-evidence/full-hooks.log"
+          fi
+          result=${PIPESTATUS[0]}
+          set -e
+          printf '%s\n' "$result" > "$RUNNER_TEMP/lint-evidence/hook-exit.txt"
+          git diff --binary > "$RUNNER_TEMP/lint-evidence/changes.patch"
+          git status --short > "$RUNNER_TEMP/lint-evidence/status.txt"
+          exit "$result"
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-${{ matrix.label }}
+          path: ${{ runner.temp }}/lint-evidence
+          retention-days: 14

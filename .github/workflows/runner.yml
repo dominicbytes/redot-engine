@@ -1,5 +1,9 @@
 name: 🔗 GHA
-on: [push, pull_request, merge_group]
+on:
+  push:
+    branches-ignore: [sandbox/lint-validation]
+  pull_request:
+  merge_group:
 
 permissions:
   contents: read
