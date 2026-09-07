@@ -251,17 +251,14 @@ public:
 
 		HashSet<struct wl_output *> wl_outputs;
 
-		/// @note If for whatever reason this callback is destroyed _while_ the event
-		/// thread is still running, it might be a good idea to set its user data to
-		/// `nullptr`. From some initial testing of mine, it looks like it might still
-		/// be called even after being destroyed, pointing to probably invalid window
-		/// data by then and segfaulting hard.
+		// Destruction and callback dispatch must both hold the Wayland mutex.
 		struct wl_callback *frame_callback = nullptr;
 		uint64_t last_frame_time = 0;
 
 		struct wl_surface *wl_surface = nullptr;
 		struct xdg_surface *xdg_surface = nullptr;
 		struct xdg_toplevel *xdg_toplevel = nullptr;
+		struct xdg_activation_token_v1 *xdg_activation_token = nullptr;
 
 		struct wp_viewport *wp_viewport = nullptr;
 		struct wp_fractional_scale_v1 *wp_fractional_scale = nullptr;
@@ -538,6 +535,7 @@ private:
 		Mutex mutex;
 
 		struct wl_display *wl_display = nullptr;
+		int wakeup_fd = -1;
 	};
 
 	/// @todo FIXME: Is this the right thing to do?
@@ -545,6 +543,7 @@ private:
 
 	Thread events_thread;
 	ThreadData thread_data;
+	int wakeup_pipe[2] = { -1, -1 };
 
 	HashMap<DisplayServer::WindowID, WindowState> windows;
 
@@ -601,8 +600,6 @@ private:
 	bool frame = true;
 
 	RegistryState registry;
-
-	bool initialized = false;
 
 #ifdef LIBDECOR_ENABLED
 	struct libdecor *libdecor_context = nullptr;
