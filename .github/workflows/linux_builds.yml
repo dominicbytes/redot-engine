@@ -38,6 +38,7 @@ jobs:
             artifact: true
             # Validate redot-cpp compatibility on one arbitrary editor build.
             redot-cpp: true
+            wayland-test: true
 
           - name: Editor with ThreadSanitizer (target=editor, dev_build=yes, use_tsan=yes, use_llvm=yes, linker=lld)
             cache-name: linux-editor-thread-sanitizer
@@ -89,6 +90,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install libwayland-bin  # TODO: Figure out somehow how to embed this one.
+          if [ "${{ matrix.wayland-test }}" == "true" ]; then
+            sudo apt-get install -y weston gdb libegl1 libgl1-mesa-dri libdecor-0-0 libdecor-0-plugin-1-cairo
+          fi
           if [ "${{ matrix.proj-test }}" == "true" ]; then
             sudo apt-get install mesa-vulkan-drivers
           fi
@@ -175,6 +179,21 @@ jobs:
         run: |
           dotnet --info
           ./modules/mono/build_scripts/build_assemblies.py --godot-output-dir=./bin --godot-platform=linuxbsd --werror
+
+      - name: Wayland lifecycle
+        if: matrix.wayland-test
+        run: |
+          for phase in destroy window_destroy wait_frame_suspend_ms; do
+            python3 misc/ci/wayland/paused_compositor.py "${{ matrix.bin }}" \
+              --phase "$phase" --output "${{ runner.temp }}/redot-wayland/$phase"
+          done
+
+      - name: Upload Wayland diagnostics
+        if: always() && matrix.wayland-test
+        uses: ./.github/actions/upload-artifact
+        with:
+          name: wayland-lifecycle
+          path: ${{ runner.temp }}/redot-wayland
 
       - name: Prepare artifact
         if: matrix.artifact
