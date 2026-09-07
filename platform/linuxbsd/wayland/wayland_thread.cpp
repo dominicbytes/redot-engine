@@ -3022,6 +3022,7 @@ void WaylandThread::_xdg_activation_token_on_done(void *data, struct xdg_activat
 
 	xdg_activation_v1_activate(ws->wayland_thread->registry.xdg_activation, token, ws->wl_surface);
 	xdg_activation_token_v1_destroy(xdg_activation_token);
+	ws->xdg_activation_token = nullptr;
 
 	DEBUG_LOG_WAYLAND_THREAD(vformat("Received activation token and requested window activation."));
 }
@@ -3032,11 +3033,12 @@ void WaylandThread::_poll_events_thread(void *p_data) {
 	ERR_FAIL_NULL(data);
 	ERR_FAIL_NULL(data->wl_display);
 
-	struct pollfd poll_fd;
-	poll_fd.fd = wl_display_get_fd(data->wl_display);
-	poll_fd.events = POLLIN | POLLHUP;
+	pollfd poll_fds[2] = {
+		{ wl_display_get_fd(data->wl_display), POLLIN, 0 },
+		{ data->wakeup_fd, POLLIN, 0 },
+	};
 
-	while (true) {
+	while (!data->thread_done.is_set()) {
 		// Empty the event queue while it's full.
 		while (wl_display_prepare_read(data->wl_display) != 0) {
 			// We aren't using wl_display_dispatch(), instead "manually" handling events
@@ -3047,7 +3049,11 @@ void WaylandThread::_poll_events_thread(void *p_data) {
 			// Note that the main thread can still call wl_display_roundtrip as that
 			// method directly handles all events, effectively bypassing this polling
 			// loop and thus the mutex locking, avoiding a deadlock.
+			// It must hold this mutex and must not run inside an event handler.
 			MutexLock mutex_lock(data->mutex);
+			if (data->thread_done.is_set()) {
+				return;
+			}
 
 			if (wl_display_dispatch_pending(data->wl_display) == -1) {
 				// Oh no. We'll check and handle any display error below.
@@ -3069,19 +3075,44 @@ void WaylandThread::_poll_events_thread(void *p_data) {
 			}
 		}
 
-		wl_display_flush(data->wl_display);
+		// A full outgoing buffer needs writable readiness before it can be flushed.
+		poll_fds[0].events = POLLIN;
+		if (wl_display_flush(data->wl_display) == -1) {
+			if (errno == EAGAIN) {
+				poll_fds[0].events |= POLLOUT;
+			} else {
+				wl_display_cancel_read(data->wl_display);
+				CRASH_NOW_MSG(vformat("Wayland flush error %d.", errno));
+			}
+		}
 
 		// Wait for the event file descriptor to have new data.
-		poll(&poll_fd, 1, -1);
+		int poll_result = poll(poll_fds, 2, -1);
+		int poll_error = errno;
 
 		if (data->thread_done.is_set()) {
 			wl_display_cancel_read(data->wl_display);
 			break;
 		}
 
-		if (poll_fd.revents | POLLIN) {
+		if (poll_result < 0) {
+			wl_display_cancel_read(data->wl_display);
+			if (poll_error == EINTR) {
+				continue;
+			}
+			CRASH_NOW_MSG(vformat("Wayland poll error %d.", poll_error));
+		}
+
+		if (poll_fds[0].revents & POLLNVAL) {
+			wl_display_cancel_read(data->wl_display);
+			CRASH_NOW_MSG("Invalid Wayland display file descriptor.");
+		}
+
+		if (poll_fds[0].revents & (POLLIN | POLLERR | POLLHUP)) {
 			// Load the queues with fresh new data.
-			wl_display_read_events(data->wl_display);
+			if (wl_display_read_events(data->wl_display) == -1) {
+				CRASH_NOW_MSG(vformat("Wayland read error %d.", wl_display_get_error(data->wl_display)));
+			}
 		} else {
 			// Oh well... Stop signaling that we want to read.
 			wl_display_cancel_read(data->wl_display);
@@ -3090,7 +3121,12 @@ void WaylandThread::_poll_events_thread(void *p_data) {
 		// The docs advise to redispatch unconditionally and it looks like that if we
 		// don't do this we can't catch protocol errors, which is bad.
 		MutexLock mutex_lock(data->mutex);
-		wl_display_dispatch_pending(data->wl_display);
+		if (data->thread_done.is_set()) {
+			break;
+		}
+		if (wl_display_dispatch_pending(data->wl_display) == -1) {
+			CRASH_NOW_MSG(vformat("Wayland dispatch error %d.", wl_display_get_error(data->wl_display)));
+		}
 	}
 }
 
@@ -3696,6 +3732,20 @@ void WaylandThread::window_destroy(DisplayServer::WindowID p_window_id) {
 	ERR_FAIL_COND(!windows.has(p_window_id));
 	WindowState &ws = windows[p_window_id];
 
+	// These objects also retain callbacks or resources tied to this window.
+	if (ws.xdg_activation_token) {
+		xdg_activation_token_v1_destroy(ws.xdg_activation_token);
+	}
+	if (ws.xdg_exported_v1) {
+		zxdg_exported_v1_destroy(ws.xdg_exported_v1);
+	}
+	if (ws.xdg_exported_v2) {
+		zxdg_exported_v2_destroy(ws.xdg_exported_v2);
+	}
+	if (ws.wp_idle_inhibitor) {
+		zwp_idle_inhibitor_v1_destroy(ws.wp_idle_inhibitor);
+	}
+
 	if (ws.xdg_popup) {
 		xdg_popup_destroy(ws.xdg_popup);
 	}
@@ -3734,11 +3784,8 @@ void WaylandThread::window_destroy(DisplayServer::WindowID p_window_id) {
 		wl_surface_destroy(ws.wl_surface);
 	}
 
-	// Before continuing, let's handle any leftover event that might still refer to
-	// this window.
-	wl_display_roundtrip(wl_display);
-
-	// We can already clean up here, we're done.
+	// Destroyed proxies discard their queued events. Waiting for a server reply
+	// here can hang window deletion (and shutdown) if the compositor stops replying.
 	windows.erase(p_window_id);
 }
 
@@ -4155,9 +4202,12 @@ void WaylandThread::window_request_attention(DisplayServer::WindowID p_window_id
 
 	if (registry.xdg_activation) {
 		// Window attention requests are done through the XDG activation protocol.
-		xdg_activation_token_v1 *xdg_activation_token = xdg_activation_v1_get_activation_token(registry.xdg_activation);
-		xdg_activation_token_v1_add_listener(xdg_activation_token, &xdg_activation_token_listener, &ws);
-		xdg_activation_token_v1_commit(xdg_activation_token);
+		if (ws.xdg_activation_token) {
+			xdg_activation_token_v1_destroy(ws.xdg_activation_token);
+		}
+		ws.xdg_activation_token = xdg_activation_v1_get_activation_token(registry.xdg_activation);
+		xdg_activation_token_v1_add_listener(ws.xdg_activation_token, &xdg_activation_token_listener, &ws);
+		xdg_activation_token_v1_commit(ws.xdg_activation_token);
 	}
 }
 
@@ -4355,8 +4405,6 @@ Error WaylandThread::init() {
 
 	thread_data.wl_display = wl_display;
 
-	events_thread.start(_poll_events_thread, &thread_data);
-
 	wl_registry = wl_display_get_registry(wl_display);
 
 	ERR_FAIL_NULL_V_MSG(wl_registry, ERR_UNAVAILABLE, "Can't obtain the Wayland registry global.");
@@ -4366,7 +4414,7 @@ Error WaylandThread::init() {
 	wl_registry_add_listener(wl_registry, &wl_registry_listener, &registry);
 
 	// Wait for registry to get notified from the compositor.
-	wl_display_roundtrip(wl_display);
+	ERR_FAIL_COND_V_MSG(wl_display_roundtrip(wl_display) == -1, ERR_CANT_CREATE, "Can't initialize the Wayland registry.");
 
 	ERR_FAIL_NULL_V_MSG(registry.wl_shm, ERR_UNAVAILABLE, "Can't obtain the Wayland shared memory global.");
 	ERR_FAIL_NULL_V_MSG(registry.wl_compositor, ERR_UNAVAILABLE, "Can't obtain the Wayland compositor global.");
@@ -4395,7 +4443,7 @@ Error WaylandThread::init() {
 	}
 
 	// Wait for seat capabilities.
-	wl_display_roundtrip(wl_display);
+	ERR_FAIL_COND_V_MSG(wl_display_roundtrip(wl_display) == -1, ERR_CANT_CREATE, "Can't initialize Wayland seats.");
 
 #ifdef LIBDECOR_ENABLED
 	bool libdecor_found = true;
@@ -4431,7 +4479,16 @@ Error WaylandThread::init() {
 	// Update the cursor.
 	cursor_set_shape(DisplayServer::CURSOR_ARROW);
 
-	initialized = true;
+	// Registry, seat, cursor and libdecor initialization may dispatch callbacks
+	// synchronously. Start the event thread only after all of them have finished.
+	ERR_FAIL_COND_V_MSG(pipe(wakeup_pipe) != 0, ERR_CANT_CREATE, "Can't create the Wayland event-thread wakeup pipe.");
+	for (int fd : wakeup_pipe) {
+		ERR_FAIL_COND_V_MSG(fcntl(fd, F_SETFL, O_NONBLOCK) == -1 || fcntl(fd, F_SETFD, FD_CLOEXEC) == -1,
+				ERR_CANT_CREATE, "Can't configure the Wayland event-thread wakeup pipe.");
+	}
+	thread_data.wakeup_fd = wakeup_pipe[0];
+	events_thread.start(_poll_events_thread, &thread_data);
+
 	return OK;
 }
 
@@ -4788,15 +4845,10 @@ bool WaylandThread::get_reset_frame() {
 // Dispatches events until a frame event is received, a window is reported as
 // suspended or the timeout expires.
 bool WaylandThread::wait_frame_suspend_ms(int p_timeout) {
-	// This is a bit of a chicken and egg thing... Looks like the main event loop
-	// has to call its rightfully forever-blocking poll right in between
-	// `wl_display_prepare_read` and `wl_display_read`. This means, that it will
-	// basically be guaranteed to stay stuck in a "prepare read" state, where it
-	// will block any other attempt at reading the display fd, such as ours. The
-	// solution? Let's make sure the mutex is locked (it should) and unblock the
-	// main thread with a roundtrip!
+	// libwayland coordinates prepared readers. Both readers poll the same display
+	// fd and pair each prepare with read or cancel; no roundtrip is needed here.
+	// Waiting for a sync reply would bypass the frame timeout.
 	MutexLock mutex_lock(mutex);
-	wl_display_roundtrip(wl_display);
 
 	if (is_suspended()) {
 		// All windows are suspended! The compositor is telling us _explicitly_ that
@@ -4815,12 +4867,15 @@ bool WaylandThread::wait_frame_suspend_ms(int p_timeout) {
 	poll_fd.fd = wl_display_get_fd(wl_display);
 	poll_fd.events = POLLIN | POLLHUP;
 
-	int begin_ms = OS::get_singleton()->get_ticks_msec();
+	uint64_t begin_ms = OS::get_singleton()->get_ticks_msec();
 	int remaining_ms = p_timeout;
 
 	while (remaining_ms > 0) {
 		// Empty the event queue while it's full.
 		while (wl_display_prepare_read(wl_display) != 0) {
+			if (OS::get_singleton()->get_ticks_msec() - begin_ms >= (uint64_t)p_timeout) {
+				return false;
+			}
 			if (wl_display_dispatch_pending(wl_display) == -1) {
 				// Oh no. We'll check and handle any display error below.
 				break;
@@ -4851,25 +4906,63 @@ bool WaylandThread::wait_frame_suspend_ms(int p_timeout) {
 			}
 		}
 
-		wl_display_flush(wl_display);
+		poll_fd.events = POLLIN;
+		if (wl_display_flush(wl_display) == -1) {
+			if (errno == EAGAIN) {
+				poll_fd.events |= POLLOUT;
+			} else {
+				wl_display_cancel_read(wl_display);
+				CRASH_NOW_MSG(vformat("Wayland flush error %d.", errno));
+			}
+		}
+
+		// Dispatching queued callbacks also consumes the frame-wait budget.
+		uint64_t elapsed_ms = OS::get_singleton()->get_ticks_msec() - begin_ms;
+		if (elapsed_ms >= (uint64_t)p_timeout) {
+			wl_display_cancel_read(wl_display);
+			return false;
+		}
+		remaining_ms = p_timeout - (int)elapsed_ms;
 
 		// Wait for the event file descriptor to have new data.
-		poll(&poll_fd, 1, remaining_ms);
+		int poll_result = poll(&poll_fd, 1, remaining_ms);
+		int poll_error = errno;
 
-		if (poll_fd.revents | POLLIN) {
+		if (poll_result <= 0) {
+			wl_display_cancel_read(wl_display);
+			if (poll_result == 0) {
+				return false;
+			}
+			if (poll_error == EINTR) {
+				remaining_ms = p_timeout - (int)(OS::get_singleton()->get_ticks_msec() - begin_ms);
+				continue;
+			}
+			CRASH_NOW_MSG(vformat("Wayland poll error %d.", poll_error));
+		}
+
+		if (poll_fd.revents & POLLNVAL) {
+			wl_display_cancel_read(wl_display);
+			CRASH_NOW_MSG("Invalid Wayland display file descriptor.");
+		}
+
+		if (poll_fd.revents & (POLLIN | POLLERR | POLLHUP)) {
 			// Load the queues with fresh new data.
-			wl_display_read_events(wl_display);
+			if (wl_display_read_events(wl_display) == -1) {
+				CRASH_NOW_MSG(vformat("Wayland read error %d.", wl_display_get_error(wl_display)));
+			}
 		} else {
 			// Oh well... Stop signaling that we want to read.
 			wl_display_cancel_read(wl_display);
 
-			// We've got no new events :(
-			// We won't even bother with checking the frame flag.
-			return false;
+			// Writable-only readiness lets the next iteration flush queued requests.
+			remaining_ms = p_timeout - (int)(OS::get_singleton()->get_ticks_msec() - begin_ms);
+			continue;
 		}
 
 		// Let's try dispatching now...
-		wl_display_dispatch_pending(wl_display);
+		if (wl_display_dispatch_pending(wl_display) == -1) {
+			CRASH_NOW_MSG(vformat("Wayland dispatch error %d.", wl_display_get_error(wl_display)));
+		}
 
 		if (is_suspended()) {
 			return false;
@@ -4913,51 +5006,32 @@ bool WaylandThread::is_suspended() const {
 }
 
 void WaylandThread::destroy() {
-	if (!initialized) {
+	// Also release resources acquired by an initialization that failed before
+	// starting the event thread. The display is null if loading/connecting failed.
+	if (!wl_display) {
 		return;
 	}
 
 	if (wl_display && events_thread.is_started()) {
 		thread_data.thread_done.set();
 
-		// By sending a roundtrip message we're unblocking the polling thread so that
-		// it can realize that it's done and also handle every event that's left.
-		wl_display_roundtrip(wl_display);
+		// Wake locally: shutdown must not depend on the compositor sending a reply.
+		// EAGAIN means the pipe already contains a pending wakeup.
+		char wakeup = 0;
+		while (write(wakeup_pipe[1], &wakeup, sizeof(wakeup)) == -1 && errno == EINTR) {
+		}
 
 		events_thread.wait_to_finish();
 	}
-
-	for (KeyValue<DisplayServer::WindowID, WindowState> &pair : windows) {
-		WindowState &ws = pair.value;
-		if (ws.wp_fractional_scale) {
-			wp_fractional_scale_v1_destroy(ws.wp_fractional_scale);
+	for (int &fd : wakeup_pipe) {
+		if (fd != -1) {
+			close(fd);
+			fd = -1;
 		}
+	}
 
-		if (ws.wp_viewport) {
-			wp_viewport_destroy(ws.wp_viewport);
-		}
-
-		if (ws.frame_callback) {
-			wl_callback_destroy(ws.frame_callback);
-		}
-
-#ifdef LIBDECOR_ENABLED
-		if (ws.libdecor_frame) {
-			libdecor_frame_close(ws.libdecor_frame);
-		}
-#endif // LIBDECOR_ENABLED
-
-		if (ws.xdg_toplevel) {
-			xdg_toplevel_destroy(ws.xdg_toplevel);
-		}
-
-		if (ws.xdg_surface) {
-			xdg_surface_destroy(ws.xdg_surface);
-		}
-
-		if (ws.wl_surface) {
-			wl_surface_destroy(ws.wl_surface);
-		}
+	while (!windows.is_empty()) {
+		window_destroy(windows.begin()->key);
 	}
 
 	for (struct wl_seat *wl_seat : registry.wl_seats) {
@@ -5011,6 +5085,18 @@ void WaylandThread::destroy() {
 			zwp_confined_pointer_v1_destroy(ss->wp_confined_pointer);
 		}
 
+		if (ss->wp_pointer_gesture_pinch) {
+			zwp_pointer_gesture_pinch_v1_destroy(ss->wp_pointer_gesture_pinch);
+		}
+
+		if (ss->wp_primary_selection_device) {
+			zwp_primary_selection_device_v1_destroy(ss->wp_primary_selection_device);
+		}
+
+		if (ss->wp_text_input) {
+			zwp_text_input_v3_destroy(ss->wp_text_input);
+		}
+
 		if (ss->wp_tablet_seat) {
 			zwp_tablet_seat_v2_destroy(ss->wp_tablet_seat);
 		}
@@ -5038,8 +5124,27 @@ void WaylandThread::destroy() {
 		wl_cursor_theme_destroy(wl_cursor_theme);
 	}
 
+#ifdef LIBDECOR_ENABLED
+	if (libdecor_context) {
+		libdecor_unref(libdecor_context);
+		libdecor_context = nullptr;
+	}
+#endif // LIBDECOR_ENABLED
+
 	if (registry.wp_idle_inhibit_manager) {
 		zwp_idle_inhibit_manager_v1_destroy(registry.wp_idle_inhibit_manager);
+	}
+
+	if (registry.wp_primary_selection_device_manager) {
+		zwp_primary_selection_device_manager_v1_destroy(registry.wp_primary_selection_device_manager);
+	}
+
+	if (registry.wp_tablet_manager) {
+		zwp_tablet_manager_v2_destroy(registry.wp_tablet_manager);
+	}
+
+	if (registry.wp_text_input_manager) {
+		zwp_text_input_manager_v3_destroy(registry.wp_text_input_manager);
 	}
 
 	if (registry.wp_pointer_constraints) {
@@ -5098,12 +5203,21 @@ void WaylandThread::destroy() {
 		wl_compositor_destroy(registry.wl_compositor);
 	}
 
+	if (registry.wl_subcompositor) {
+		wl_subcompositor_destroy(registry.wl_subcompositor);
+	}
+
+	if (registry.wl_data_device_manager) {
+		wl_data_device_manager_destroy(registry.wl_data_device_manager);
+	}
+
 	if (wl_registry) {
 		wl_registry_destroy(wl_registry);
 	}
 
 	if (wl_display) {
 		wl_display_disconnect(wl_display);
+		wl_display = nullptr;
 	}
 }
 
