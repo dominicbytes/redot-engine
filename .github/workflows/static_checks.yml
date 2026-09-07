@@ -48,6 +48,7 @@ jobs:
         run: python tests/python_build/test_ci_lint.py
 
       - name: Style checks via pre-commit
+        id: lint
         env:
           LINT_ALL_FILES: ${{ inputs.all_files }}
         run: python misc/scripts/ci_lint.py
@@ -61,3 +62,19 @@ jobs:
       - name: Run C compiler on `gdextension_interface.h`
         run: |
           gcc -c core/extension/gdextension_interface.h
+
+      - name: Save full-tree lint diagnostics
+        if: failure() && inputs.all_files && steps.lint.outcome == 'failure'
+        run: |
+          git diff --binary > "$RUNNER_TEMP/lint-diff.patch"
+          git status --short > "$RUNNER_TEMP/lint-status.txt"
+
+      - name: Upload full-tree lint diagnostics
+        if: failure() && inputs.all_files && steps.lint.outcome == 'failure'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: full-tree-lint-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/lint-diff.patch
+            ${{ runner.temp }}/lint-status.txt
+          retention-days: 14
