@@ -1,9 +1,11 @@
 name: 📊 Static Checks
 on:
   workflow_call:
-
-env:
-  DISABLE_REDOT_GET_CHANGED_FILES: false
+    inputs:
+      all_files:
+        description: Run every automatic hook on all tracked files
+        type: boolean
+        default: false
 
 jobs:
   static-checks:
@@ -47,7 +49,7 @@ jobs:
 
       - name: Style checks via pre-commit
         env:
-          LINT_ALL_FILES: ${{ env.DISABLE_REDOT_GET_CHANGED_FILES }}
+          LINT_ALL_FILES: ${{ inputs.all_files }}
         run: python misc/scripts/ci_lint.py
 
       - name: Class reference schema checks

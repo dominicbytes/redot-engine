@@ -49,6 +49,10 @@ suite is not claimed to be portable to an unconfigured PowerShell environment.
 The workflow also runs XML schema and C-interface checks outside pre-commit.
 See `.github/workflows/static_checks.yml` for those commands.
 
+The `Full-tree lint` workflow can be run manually from the Actions tab and runs
+weekly on the default branch. It calls the same static checks with full-tree
+mode enabled; it does not launch platform builds or change required PR checks.
+
 Action revisions, Python, pre-commit, Node and direct hook dependencies are
 pinned. Transitive package dependencies and runner images are not completely
 locked. When updating pins, validate a cold-cache run and review changes in
