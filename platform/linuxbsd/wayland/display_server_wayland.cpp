@@ -1933,6 +1933,7 @@ DisplayServerWayland::DisplayServerWayland(const String &p_rendering_driver, Win
 	String session_desk = OS::get_singleton()->get_environment("XDG_SESSION_DESKTOP").to_lower();
 	swap_cancel_ok = (current_desk.contains("kde") || session_desk.contains("kde") || current_desk.contains("lxqt") || session_desk.contains("lxqt"));
 
+	MutexLock mutex_lock(wayland_thread.mutex);
 	Error thread_err = wayland_thread.init();
 
 	if (thread_err != OK) {
@@ -2203,6 +2204,7 @@ DisplayServerWayland::DisplayServerWayland(const String &p_rendering_driver, Win
 }
 
 DisplayServerWayland::~DisplayServerWayland() {
+	wayland_thread.mutex.lock();
 	if (native_menu) {
 		memdelete(native_menu);
 		native_menu = nullptr;
@@ -2230,6 +2232,8 @@ DisplayServerWayland::~DisplayServerWayland() {
 	}
 	windows.clear();
 
+	// Event dispatch needs the mutex to finish before the thread can be joined.
+	wayland_thread.mutex.unlock();
 	wayland_thread.destroy();
 
 	// Destroy all drivers.
