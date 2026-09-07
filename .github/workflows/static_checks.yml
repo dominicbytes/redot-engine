@@ -32,6 +32,9 @@ jobs:
       - name: Install pre-commit
         run: python -m pip install pre-commit==4.6.2
 
+      - name: Test .NET formatting helper
+        run: python tests/python_build/test_dotnet_format.py
+
       - name: Test lint scope selection
         run: python tests/python_build/test_ci_lint.py
 
