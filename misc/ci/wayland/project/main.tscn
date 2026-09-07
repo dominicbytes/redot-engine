@@ -1,0 +1,14 @@
+[gd_scene format=3]
+
+[node name="Main" type="Control"]
+layout_mode = 3
+anchors_preset = 0
+
+[node name="Status" type="Label" parent="."]
+layout_mode = 0
+offset_left = 40.0
+offset_top = 40.0
+offset_right = 41.0
+offset_bottom = 63.0
+text = "Wayland lifecycle test
+Editor run/stop and normal close"
