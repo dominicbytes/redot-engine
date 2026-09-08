@@ -188,6 +188,19 @@ jobs:
         with:
           name: ${{ matrix.cache-name }}
 
+      - name: Missing display cleanup
+        if: matrix.target == 'editor'
+        run: |
+          python3 misc/ci/x11/no_display.py "${{ matrix.bin }}" \
+            --output "${{ runner.temp }}/redot-no-display"
+
+      - name: Upload missing display diagnostics
+        if: always() && matrix.target == 'editor'
+        uses: ./.github/actions/upload-artifact
+        with:
+          name: no-display-${{ matrix.cache-name }}
+          path: ${{ runner.temp }}/redot-no-display
+
       - name: Unit tests
         run: |
           ${{ matrix.bin }} --version

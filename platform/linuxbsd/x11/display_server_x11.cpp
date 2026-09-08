@@ -6879,11 +6879,6 @@ DisplayServerX11::DisplayServerX11(const String &p_rendering_driver, WindowMode 
 	}
 #endif
 
-	for (int i = 0; i < CURSOR_MAX; i++) {
-		cursors[i] = None;
-		cursor_img[i] = nullptr;
-	}
-
 	XInitThreads(); //always use threads
 
 	/** XLIB INITIALIZATION **/
@@ -7462,12 +7457,16 @@ DisplayServerX11::DisplayServerX11(const String &p_rendering_driver, WindowMode 
 
 DisplayServerX11::~DisplayServerX11() {
 	// Send owned clipboard data to clipboard manager before exit.
-	Window x11_main_window = windows[MAIN_WINDOW_ID].x11_window;
-	_clipboard_transfer_ownership(XA_PRIMARY, x11_main_window);
-	_clipboard_transfer_ownership(XInternAtom(x11_display, "CLIPBOARD", 0), x11_main_window);
+	if (x11_display && windows.has(MAIN_WINDOW_ID)) {
+		Window x11_main_window = windows[MAIN_WINDOW_ID].x11_window;
+		_clipboard_transfer_ownership(XA_PRIMARY, x11_main_window);
+		_clipboard_transfer_ownership(XInternAtom(x11_display, "CLIPBOARD", 0), x11_main_window);
+	}
 
 	events_thread_done.set();
-	events_thread.wait_to_finish();
+	if (events_thread.is_started()) {
+		events_thread.wait_to_finish();
+	}
 
 	if (native_menu) {
 		memdelete(native_menu);
@@ -7570,7 +7569,9 @@ DisplayServerX11::~DisplayServerX11() {
 		XCloseIM(xim);
 	}
 
-	XCloseDisplay(x11_display);
+	if (x11_display) {
+		XCloseDisplay(x11_display);
+	}
 	if (xmbstring) {
 		memfree(xmbstring);
 	}

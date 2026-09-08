@@ -244,12 +244,12 @@ class DisplayServerX11 : public DisplayServer {
 	String internal_clipboard;
 	String internal_clipboard_primary;
 	Window xdnd_source_window = 0;
-	::Display *x11_display;
+	::Display *x11_display = nullptr;
 	char *xmbstring = nullptr;
 	int xmblen = 0;
 	unsigned long last_timestamp = 0;
 	::Time last_keyrelease_time = 0;
-	::XIM xim;
+	::XIM xim = nullptr;
 	::XIMStyle xim_style;
 
 	static int _xim_preedit_start_callback(::XIM xim, ::XPointer client_data,
@@ -322,8 +322,8 @@ class DisplayServerX11 : public DisplayServer {
 
 	const char *cursor_theme = nullptr;
 	int cursor_size = 0;
-	XcursorImage *cursor_img[CURSOR_MAX];
-	Cursor cursors[CURSOR_MAX];
+	XcursorImage *cursor_img[CURSOR_MAX] = {};
+	Cursor cursors[CURSOR_MAX] = {};
 	Cursor null_cursor;
 	CursorShape current_cursor = CURSOR_ARROW;
 	HashMap<CursorShape, Vector<Variant>> cursors_cache;
