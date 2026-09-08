@@ -5,12 +5,15 @@ the headless unit suite, which does not create a Wayland display server.
 
 ## Isolated compositor failures
 
-Install Python 3, GDB, Weston, Mesa's software OpenGL driver, and libdecor with its
+Install Python 3, GDB, binutils, Weston, Mesa's software OpenGL driver, and libdecor with its
 Cairo plugin. The runner uses Weston's headless backend and Pixman renderer,
 an isolated runtime directory, and software OpenGL for Redot. It unsets `DISPLAY`
 so a successful X11 fallback cannot hide a Wayland failure.
 
-Run from the repository root, using an editor executable with function symbols:
+Run from the repository root, using an editor executable built with
+`debug_symbols=yes`. The frame test also requires retained DWARF debug information.
+`dev_mode=yes` alone does not preserve symbols. The runner checks these requirements
+before starting the compositor:
 
 ```sh
 python3 misc/ci/wayland/paused_compositor.py bin/redot.linuxbsd.editor.x86_64 \
@@ -24,9 +27,13 @@ python3 misc/ci/wayland/paused_compositor.py bin/redot.linuxbsd.editor.x86_64 \
 Each command starts its own compositor, waits for its socket, starts the project
 manager under GDB, and pauses only that compositor at the selected engine
 function. The destruction checks require normal process exit while the compositor
-remains paused. The frame check requires the function to return, then deliberately
-terminates the test process. It does not guarantee that every frame-wait branch
-was exercised. Startup failure or missing breakpoints fail the check.
+remains paused. The frame check asserts a non-suspended window, clears any pending
+frame, and suppresses readiness from already-buffered callbacks with a watchpoint
+while their normal proxy cleanup runs. It requires entry into polling, a false
+return, and elapsed time between 90% of the requested timeout and that timeout
+plus one second of scheduling/debugger allowance. It then resumes its compositor,
+requires a fresh frame callback, and requires normal process exit. Startup failure,
+missing breakpoints, crashes, early returns, and failed recovery fail the check.
 
 For an unpatched baseline that stalls during concurrent initialization, add
 `--serialize-init` to make GDB run `WaylandThread::init()` with only the calling
@@ -43,15 +50,22 @@ return without a hang or crash, then deliberately terminates the process. This
 isolates Wayland cleanup from subsequent fallback to another display backend.
 
 The startup deadline is 30 seconds; the post-breakpoint deadline defaults to
-5 seconds. Logs, backtraces, and machine-readable results go in `--output`. Use a
+5 seconds. After verified frame recovery, normal startup/exit has an additional
+30-second deadline (`--exit-timeout`). The frame budget is asserted independently
+inside GDB. Logs, backtraces, and machine-readable results go in `--output`. Use a
 fresh output directory for each invocation. Detached compositor children are
 cleaned up by the runner and may appear in the `leftovers` diagnostic.
 
 On memory-constrained hosts, preserve the original debug executable and create a
-probe copy using `objcopy --strip-debug INPUT OUTPUT`. This retains function
+probe copy for the destruction checks using `objcopy --strip-debug INPUT OUTPUT`. This retains function
 symbols and unwind information while avoiding GDB loading the engine's large
-DWARF data. Do not run multiple full-symbol debuggers or automatic crash
-symbolizers alongside a linker.
+DWARF data. Use the original executable for the frame test, and cap the test
+process group's memory with a local resource manager. Do not run multiple
+full-symbol debuggers or automatic crash symbolizers alongside a linker.
+
+Linux CI runs all three phases in the Mono editor and ThreadSanitizer editor
+jobs before stripping artifacts. The sanitizer job therefore exercises native
+Wayland display lifecycle in addition to its headless unit tests.
 
 ## Normal close in Hyprland
 

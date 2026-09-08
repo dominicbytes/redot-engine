@@ -29,7 +29,7 @@ jobs:
           - name: Editor w/ Mono (target=editor)
             cache-name: linux-editor-mono
             target: editor
-            scons-flags: module_mono_enabled=yes
+            scons-flags: module_mono_enabled=yes debug_symbols=yes
             bin: ./bin/redot.linuxbsd.editor.x86_64.mono
             build-mono: true
             doc-test: true
@@ -49,6 +49,7 @@ jobs:
               use_llvm=yes
               linker=lld
             bin: ./bin/redot.linuxbsd.editor.dev.x86_64.llvm.san
+            wayland-test: true
 
           - name: Template w/ Mono, release (target=template_release)
             cache-name: linux-template-mono
@@ -192,7 +193,7 @@ jobs:
         if: always() && matrix.wayland-test
         uses: ./.github/actions/upload-artifact
         with:
-          name: wayland-lifecycle
+          name: wayland-lifecycle-${{ matrix.cache-name }}
           path: ${{ runner.temp }}/redot-wayland
 
       - name: Prepare artifact
