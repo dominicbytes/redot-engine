@@ -104,15 +104,10 @@ DirectorySetupDialog::DirectorySetupDialog() {
 	ConfirmationDialog::set_visible(true);
 }
 
-DirectorySetupDialog::~DirectorySetupDialog() {
-	_spacer->queue_free();
-	_select_dir_btn->queue_free();
-	_select_dir_le->queue_free();
-	_dir_hbox->queue_free();
-	_dir_label->queue_free();
-	_instructions->queue_free();
-	_vbox->queue_free();
-	_margin->queue_free();
+void DirectorySetupDialog::_notification(int what) {
+	if (what == NOTIFICATION_PREDELETE) {
+		memdelete(_margin);
+	}
 }
 
 void DirectorySetup::setup_layout() {
@@ -139,13 +134,16 @@ void DirectorySetup::setup_layout() {
 
 DirectorySetup::DirectorySetup(WorldScape3DEditorPlugin *plugin) :
 		_plugin{ plugin }, _dialog{ memnew(DirectorySetupDialog) }, _file_dialog{ memnew(EditorFileDialog) } {
+	_dialog_id = _dialog->get_instance_id();
+	_dialog->set_unparent_when_invisible(true);
 	_dialog->hide();
 	setup_layout();
 }
 
 DirectorySetup::~DirectorySetup() {
-	_file_dialog->queue_free();
-	_dialog->queue_free();
+	if (Object *dialog = ObjectDB::get_instance(_dialog_id)) {
+		memdelete(dialog);
+	}
 }
 
 void DirectorySetup::directory_setup_popup() {
