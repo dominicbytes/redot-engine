@@ -98,7 +98,6 @@ class ListEntry : public MarginContainer {
 
 public:
 	explicit ListEntry(WorldScape3DAssets::AssetType type);
-	~ListEntry() override;
 
 	void set_assets(Ref<WorldScape3DAssets> assets_list) {
 		_asset_list = assets_list;
@@ -149,7 +148,6 @@ class ListContainer : public Container {
 
 public:
 	explicit ListContainer(WorldScape3DEditorPlugin *plugin);
-	~ListContainer() override;
 
 	void redraw();
 	void clear();

@@ -65,7 +65,7 @@ class DirectorySetupDialog final : public ConfirmationDialog {
 
 public:
 	DirectorySetupDialog();
-	~DirectorySetupDialog() override;
+	void _notification(int what);
 
 	Button *get_dir_button() const { return _select_dir_btn; }
 	LineEdit *get_dir_edit() const { return _select_dir_le; }
@@ -76,6 +76,7 @@ class DirectorySetup final : public Node {
 
 	WorldScape3DEditorPlugin *_plugin = nullptr;
 	DirectorySetupDialog *_dialog = nullptr;
+	ObjectID _dialog_id;
 	EditorFileDialog *_file_dialog = nullptr;
 
 	void setup_layout();
