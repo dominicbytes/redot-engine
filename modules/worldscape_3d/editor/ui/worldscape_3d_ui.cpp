@@ -292,6 +292,38 @@ WorldScape3DUI::WorldScape3DUI(WorldScape3DEditorPlugin *plugin) :
 	_asset_dock = memnew(WorldScape3DAssetDock(plugin));
 }
 
+WorldScape3DUI::~WorldScape3DUI() {
+	if (_plugin) {
+		using enum EditorPlugin::CustomControlContainer;
+		_plugin->remove_control_from_container(CONTAINER_SPATIAL_EDITOR_MENU, _menu);
+		_plugin->remove_control_from_container(CONTAINER_SPATIAL_EDITOR_BOTTOM, _tool_settings);
+		_plugin->remove_control_from_container(CONTAINER_SPATIAL_EDITOR_SIDE_LEFT, _toolbar);
+		_plugin = nullptr;
+	}
+	if (_toolbar) {
+		memdelete(_toolbar);
+		_toolbar = nullptr;
+	}
+	if (_menu) {
+		memdelete(_menu);
+		_menu = nullptr;
+	}
+	if (_tool_settings) {
+		if (_tool_settings->is_connected("setting_changed", callable_mp(this, &WorldScape3DUI::on_setting_changed))) {
+			_tool_settings->disconnect("setting_changed", callable_mp(this, &WorldScape3DUI::on_setting_changed));
+		}
+		if (_tool_settings->is_connected("picking", callable_mp(_tool_settings, &WorldScape3DToolSettings::on_pick))) {
+			_tool_settings->disconnect("picking", callable_mp(_tool_settings, &WorldScape3DToolSettings::on_pick));
+		}
+		memdelete(_tool_settings);
+		_tool_settings = nullptr;
+	}
+	if (_asset_dock) {
+		memdelete(_asset_dock);
+		_asset_dock = nullptr;
+	}
+}
+
 void WorldScape3DUI::on_visible_update() {
 	if (auto editor = _plugin->get_editor(); editor) {
 		editor->set_tool(_selected_tool);
@@ -300,6 +332,9 @@ void WorldScape3DUI::on_visible_update() {
 }
 
 void WorldScape3DUI::update_decal() {
+	if (!is_inside_tree()) {
+		return;
+	}
 	auto terrain = _plugin->get_terrain();
 	if (!terrain || _brush_data.size() <= 3) {
 		return;
@@ -905,7 +940,6 @@ void WorldScape3DUI::_bind_methods() {
 }
 
 void WorldScape3DUI::_notification(int what) {
-	Node::_notification(what);
 	switch (what) {
 		case NOTIFICATION_ENTER_TREE: {
 			on_tool_changed(WorldScape3DEditor::Tool::REGION, WorldScape3DEditor::Operation::ADD);
