@@ -1777,7 +1777,9 @@ void SceneTreeEditor::_update_selection(TreeItem *item) {
 }
 
 void SceneTreeEditor::_selection_changed() {
-	if (!editor_selection) {
+	// A deferred selection change can be flushed after this editor has left the tree
+	// during shutdown. Selection is reapplied by _update_tree() when it enters again.
+	if (!editor_selection || !is_inside_tree()) {
 		return;
 	}
 
