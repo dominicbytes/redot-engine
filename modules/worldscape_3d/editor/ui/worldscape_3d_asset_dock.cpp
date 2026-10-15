@@ -111,22 +111,16 @@ ListEntry::ListEntry(const WorldScape3DAssets::AssetType type) {
 	_button_edit = memnew(TextureButton);
 	_spacer = memnew(Control);
 	_button_enabled = memnew(TextureButton);
-}
+	_button_enabled->hide();
 
-ListEntry::~ListEntry() {
-	if (_count_label) {
-		_count_label->queue_free();
-	}
-	if (_name_label) {
-		_name_label->queue_free();
-	}
-	_button_enabled->queue_free();
-	_spacer->queue_free();
-	_button_edit->queue_free();
-	_button_clear->queue_free();
-	_button_row->queue_free();
-	_margin->queue_free();
-	_label_rows->queue_free();
+	// Own the controls before the entry first enters the tree.
+	add_child(_label_rows);
+	add_child(_margin);
+	_margin->add_child(_button_row);
+	_button_row->add_child(_button_enabled);
+	_button_row->add_child(_button_edit);
+	_button_row->add_child(_spacer);
+	_button_row->add_child(_button_clear);
 }
 
 void ListEntry::_bind_methods() {
@@ -500,10 +494,6 @@ ListContainer::ListContainer(WorldScape3DEditorPlugin *plugin) :
 	set_name("ListContainer");
 	set_v_size_flags(SIZE_EXPAND_FILL);
 	set_h_size_flags(SIZE_EXPAND_FILL);
-}
-
-ListContainer::~ListContainer() {
-	clear();
 }
 
 void ListContainer::clear() {
