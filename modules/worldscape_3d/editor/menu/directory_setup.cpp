@@ -104,17 +104,6 @@ DirectorySetupDialog::DirectorySetupDialog() {
 	ConfirmationDialog::set_visible(true);
 }
 
-DirectorySetupDialog::~DirectorySetupDialog() {
-	_spacer->queue_free();
-	_select_dir_btn->queue_free();
-	_select_dir_le->queue_free();
-	_dir_hbox->queue_free();
-	_dir_label->queue_free();
-	_instructions->queue_free();
-	_vbox->queue_free();
-	_margin->queue_free();
-}
-
 void DirectorySetup::setup_layout() {
 	_file_dialog->set_filters({ "*.res" });
 	_file_dialog->set_file_mode(EditorFileDialog::FILE_MODE_SAVE_FILE);
@@ -140,12 +129,8 @@ void DirectorySetup::setup_layout() {
 DirectorySetup::DirectorySetup(WorldScape3DEditorPlugin *plugin) :
 		_plugin{ plugin }, _dialog{ memnew(DirectorySetupDialog) }, _file_dialog{ memnew(EditorFileDialog) } {
 	_dialog->hide();
+	add_child(_dialog);
 	setup_layout();
-}
-
-DirectorySetup::~DirectorySetup() {
-	_file_dialog->queue_free();
-	_dialog->queue_free();
 }
 
 void DirectorySetup::directory_setup_popup() {
@@ -161,7 +146,7 @@ void DirectorySetup::directory_setup_popup() {
 	_dialog->set_visible(true);
 
 	// popup
-	EditorInterface::get_singleton()->popup_dialog_centered(_dialog);
+	_dialog->popup_centered();
 }
 
 void DirectorySetup::on_select_file_pressed(EditorFileDialog::FileMode mode) {
