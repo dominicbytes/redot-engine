@@ -76,6 +76,70 @@ TEST_CASE("[Logger][RotatedFileLogger] Creates the first log file and logs on it
 	cleanup_logs();
 }
 
+TEST_CASE("[Logger][RotatedFileLogger] Creates missing relative log directories") {
+	initialize_logs();
+	// Run from a directory other than the user data directory, as `--path` does.
+	const String user_dir = OS::get_singleton()->get_user_data_dir();
+	const String work_dir = user_dir.path_join("logs/work");
+	DirAccess::make_dir_recursive_absolute(work_dir);
+	const String previous_cwd = DirAccess::create(DirAccess::ACCESS_FILESYSTEM)->get_current_dir();
+	REQUIRE_EQ(OS::get_singleton()->set_cwd(work_dir), OK);
+
+	{
+		RotatedFileLogger logger("nested/relative.log", 1);
+		logger.logf("%s", "Relative log output");
+	}
+
+	REQUIRE_EQ(OS::get_singleton()->set_cwd(previous_cwd), OK);
+	Ref<FileAccess> log = FileAccess::open(work_dir.path_join("nested/relative.log"), FileAccess::READ);
+	REQUIRE(log.is_valid());
+	CHECK_EQ(log->get_as_text(), "Relative log output");
+	log.unref();
+
+	Ref<DirAccess> dir = DirAccess::open("user://logs");
+	dir->change_dir("work");
+	dir->erase_contents_recursive();
+	DirAccess::remove_absolute(work_dir);
+	cleanup_logs();
+}
+
+TEST_CASE("[Logger][RotatedFileLogger] Creates missing absolute log directories") {
+	initialize_logs();
+	const String log_path = OS::get_singleton()->get_user_data_dir().path_join("logs/absolute/nested/absolute.log");
+
+	{
+		RotatedFileLogger logger(log_path, 1);
+		logger.logf("%s", "Absolute log output");
+	}
+
+	Ref<FileAccess> log = FileAccess::open(log_path, FileAccess::READ);
+	REQUIRE(log.is_valid());
+	CHECK_EQ(log->get_as_text(), "Absolute log output");
+	log.unref();
+
+	Ref<DirAccess> dir = DirAccess::open("user://logs");
+	dir->change_dir("absolute");
+	dir->erase_contents_recursive();
+	DirAccess::remove_absolute(OS::get_singleton()->get_user_data_dir().path_join("logs/absolute"));
+	cleanup_logs();
+}
+
+TEST_CASE("[Logger][RotatedFileLogger] Ignores output when the log cannot be opened") {
+	initialize_logs();
+
+	{
+		// A directory cannot be opened as a log file.
+		ERR_PRINT_OFF;
+		RotatedFileLogger logger("user://logs", 1);
+		ERR_PRINT_ON;
+		logger.logf("%s", "Ignored output");
+		logger.logf_error("%s", "Ignored error");
+	}
+	CHECK(DirAccess::dir_exists_absolute(OS::get_singleton()->get_user_data_dir().path_join("logs")));
+
+	cleanup_logs();
+}
+
 void get_log_files(Vector<String> &log_files) {
 	Ref<DirAccess> dir = DirAccess::open("user://logs");
 	dir->list_dir_begin();

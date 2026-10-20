@@ -163,13 +163,15 @@ void RotatedFileLogger::rotate_file() {
 			clear_old_backups();
 		}
 	} else {
-		Ref<DirAccess> da = DirAccess::create(DirAccess::ACCESS_USERDATA);
+		// Create directories with the same access as the file, so relative paths resolve alike.
+		Ref<DirAccess> da = DirAccess::create_for_path(base_path);
 		if (da.is_valid()) {
 			da->make_dir_recursive(base_path.get_base_dir());
 		}
 	}
 
 	file = FileAccess::open(base_path, FileAccess::WRITE);
+	ERR_FAIL_COND_MSG(file.is_null(), "Failed to open log file for writing: " + base_path);
 	file->detach_from_objectdb(); // Note: This FileAccess instance will exist longer than ObjectDB, therefore can't be registered in ObjectDB.
 }
 
