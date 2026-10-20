@@ -1639,6 +1639,19 @@ void AudioServer::load_default_bus_layout() {
 	}
 }
 
+void AudioServer::free_playbacks() {
+	// A playback leaves the list in two steps: the audio thread marks it for deletion after its
+	// fade-out, then update() frees it on the main thread. At shutdown neither may run again,
+	// so playbacks that were still playing, paused or fading out would be leaked. The lock keeps
+	// the audio thread out of the list while they are removed and freed.
+	lock();
+	for (AudioStreamPlaybackListNode *playback : playback_list) {
+		_delete_stream_playback_list_node(playback);
+	}
+	playback_list.maybe_cleanup();
+	unlock();
+}
+
 void AudioServer::finish() {
 	for (int i = 0; i < AudioDriverManager::get_driver_count(); i++) {
 		AudioDriverManager::get_driver(i)->finish();

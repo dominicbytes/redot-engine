@@ -465,6 +465,8 @@ public:
 	virtual void init();
 	virtual void finish();
 	virtual void update();
+	// Frees every stream playback still in the playback list. Called once at shutdown.
+	void free_playbacks();
 	virtual void load_default_bus_layout();
 
 	/* MISC config */
