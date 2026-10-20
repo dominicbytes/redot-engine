@@ -35,6 +35,8 @@
 #include "core/object/class_db.h"
 #include "core/object/object.h"
 #include "core/object/script_language.h"
+#include "core/templates/hash_set.h"
+#include "core/templates/local_vector.h"
 
 #include "tests/test_macros.h"
 
@@ -594,6 +596,44 @@ TEST_CASE("[Object] Destruction at the end of the call chain is safe") {
 	CHECK_MESSAGE(
 			ObjectDB::get_instance(obj_id) == nullptr,
 			"Object was tail-deleted without crashes.");
+}
+
+static HashSet<Object *> visited_objects;
+
+static void visit_object(Object *p_obj) {
+	visited_objects.insert(p_obj);
+}
+
+TEST_CASE("[Object] ObjectDB counts and visits every instance") {
+	const int initial_count = ObjectDB::get_object_count();
+
+	// Enough objects to fill several ObjectDB blocks.
+	const int object_count = 1000;
+	LocalVector<Object *> objects;
+	for (int i = 0; i < object_count; i++) {
+		objects.push_back(memnew(Object));
+	}
+	CHECK(ObjectDB::get_object_count() == initial_count + object_count);
+
+	visited_objects.clear();
+	ObjectDB::debug_objects(visit_object);
+	int visited = 0;
+	for (Object *obj : objects) {
+		visited += visited_objects.has(obj);
+	}
+	visited_objects.clear();
+	CHECK_MESSAGE(visited == object_count, "debug_objects() visits every live object.");
+
+	// Free every other object, so the free slots are spread over the blocks.
+	for (int i = 0; i < object_count; i += 2) {
+		memdelete(objects[i]);
+	}
+	CHECK(ObjectDB::get_object_count() == initial_count + object_count / 2);
+
+	for (int i = 1; i < object_count; i += 2) {
+		memdelete(objects[i]);
+	}
+	CHECK(ObjectDB::get_object_count() == initial_count);
 }
 
 } // namespace TestObject

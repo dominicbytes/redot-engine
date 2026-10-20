@@ -2360,7 +2360,7 @@ void postinitialize_handler(Object *p_object) {
 
 void ObjectDB::debug_objects(DebugFunc p_func) {
 	mutex.lock();
-	for (uint32_t i = 1; i < block_count; i++) {
+	for (uint32_t i = 1; i <= block_max; i++) {
 		for (uint32_t j = 0; j < blocks_max_sizes[i]; j++) {
 			if (blocks[i][j].validator) {
 				Object *obj = blocks[i][j].object;
@@ -2461,8 +2461,21 @@ const uint32_t ObjectDB::blocks_max_sizes[OBJECTDB_MAX_BLOCKS] = {
 
 ObjectDB::ObjectSlot *ObjectDB::blocks[OBJECTDB_MAX_BLOCKS] = { nullptr };
 
+uint32_t ObjectDB::_get_instance_count() {
+	// Free slots are handed out in order across the blocks: every block below `block_count`
+	// is full, and the first `slot_count` slots of block `block_count` are in use.
+	uint32_t count = slot_count;
+	for (uint32_t i = 1; i < block_count; i++) {
+		count += blocks_max_sizes[i];
+	}
+	return count;
+}
+
 int ObjectDB::get_object_count() {
-	return slot_count;
+	mutex.lock();
+	uint32_t count = _get_instance_count();
+	mutex.unlock();
+	return count;
 }
 
 ObjectID ObjectDB::add_instance(Object *p_object) {
@@ -2564,7 +2577,7 @@ void ObjectDB::setup() {
 void ObjectDB::cleanup() {
 	mutex.lock();
 
-	if (slot_count > 0) {
+	if (_get_instance_count() > 0) {
 		WARN_PRINT("ObjectDB instances leaked at exit (run with --verbose for details).");
 		if (OS::get_singleton()->is_stdout_verbose()) {
 			// Ensure calling the native classes because if a leaked instance has a script
@@ -2574,7 +2587,8 @@ void ObjectDB::cleanup() {
 			MethodBind *resource_get_path = ClassDB::get_method("Resource", "get_path");
 			Callable::CallError call_error;
 
-			for (uint32_t i = 1; i < block_count; i++) {
+			// Live objects can be in any allocated block, not only below `block_count`.
+			for (uint32_t i = 1; i <= block_max; i++) {
 				for (uint32_t j = 0; j < blocks_max_sizes[i]; j++) {
 					if (blocks[i][j].validator) {
 						Object *obj = blocks[i][j].object;
@@ -2587,7 +2601,10 @@ void ObjectDB::cleanup() {
 							extra_info = " - Resource path: " + String(resource_get_path->call(obj, nullptr, 0, call_error));
 						}
 
-						uint64_t id = uint64_t(i) | (uint64_t(blocks[i][j].validator) << OBJECTDB_SLOT_MAX_COUNT_BITS) | (blocks[i][j].is_ref_counted ? OBJECTDB_REFERENCE_BIT : 0);
+						NextFree slot;
+						slot.block_number = i;
+						slot.block_position = j;
+						uint64_t id = uint64_t(slot.position) | (uint64_t(blocks[i][j].validator) << OBJECTDB_SLOT_MAX_POSITION_BITS) | (blocks[i][j].is_ref_counted ? OBJECTDB_REFERENCE_BIT : 0);
 						DEV_ASSERT(id == (uint64_t)obj->get_instance_id()); // We could just use the id from the object, but this check may help catching memory corruption catastrophes.
 						print_line("Leaked instance: " + String(obj->get_class()) + ":" + uitos(id) + extra_info);
 					}
@@ -2597,9 +2614,14 @@ void ObjectDB::cleanup() {
 		}
 	}
 
-	for (uint32_t i = 1; i < block_count; i++) {
+	for (uint32_t i = 1; i <= block_max; i++) {
 		memfree(blocks[i]);
+		blocks[i] = nullptr;
 	}
+	slot_count = 0;
+	block_count = 0;
+	slot_max = 0;
+	block_max = 0;
 	mutex.unlock();
 }
 Object *ObjectDB::get_instance(ObjectID p_instance_id) {
