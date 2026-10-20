@@ -1796,6 +1796,15 @@ void GDScript::clear(ClearData *p_clear_data) {
 			}
 		}
 		clear_data->clear();
+
+		// Release the base script here, while the caller still holds this script. If this is the
+		// last reference to the base, freeing it later (when this script is released) could free
+		// the next script that `GDScriptLanguage::finish()` is about to visit.
+#ifdef TOOLS_ENABLED
+		base_cache = Ref<GDScript>();
+#endif
+		_base = nullptr;
+		base = Ref<GDScript>();
 	}
 }
 
