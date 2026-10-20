@@ -5132,6 +5132,12 @@ void Main::cleanup(bool p_force) {
 	ResourceLoader::clear_translation_remaps();
 	ScriptServer::finish_languages();
 
+	// Free sounds that were still playing or fading out, while the modules and extensions
+	// that provide their playbacks are still initialized.
+	if (audio_server) {
+		audio_server->free_playbacks();
+	}
+
 	// Sync pending commands that may have been queued from a different thread during ScriptServer finalization
 	RenderingServer::get_singleton()->sync();
 
