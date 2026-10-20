@@ -1079,6 +1079,7 @@ class ObjectDB {
 
 	static ObjectID add_instance(Object *p_object);
 	static void remove_instance(Object *p_object);
+	static uint32_t _get_instance_count(); // Call with the mutex locked.
 
 	friend void register_core_types();
 	static void setup();
