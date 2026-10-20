@@ -555,6 +555,14 @@ Error RenderingDeviceDriverVulkan::_initialize_device_extensions() {
 #endif
 	_register_requested_device_extension(VK_EXT_DEVICE_FAULT_EXTENSION_NAME, false);
 
+#ifdef WINDOWS_ENABLED
+	if (physical_device_properties.vendorID == RenderingContextDriver::Vendor::VENDOR_NVIDIA) {
+		// Used to work around an NVIDIA driver issue when a window is closed, see swap_chain_free().
+		_register_requested_device_extension(VK_KHR_PRESENT_ID_EXTENSION_NAME, false);
+		_register_requested_device_extension(VK_KHR_PRESENT_WAIT_EXTENSION_NAME, false);
+	}
+#endif
+
 	{
 		// Debug marker extensions.
 		// Should be last element in the array.
@@ -767,6 +775,8 @@ Error RenderingDeviceDriverVulkan::_check_device_capabilities() {
 		VkPhysicalDevice16BitStorageFeaturesKHR storage_feature = {};
 		VkPhysicalDeviceMultiviewFeatures multiview_features = {};
 		VkPhysicalDevicePipelineCreationCacheControlFeatures pipeline_cache_control_features = {};
+		VkPhysicalDevicePresentIdFeaturesKHR present_id_features = {};
+		VkPhysicalDevicePresentWaitFeaturesKHR present_wait_features = {};
 
 		const bool use_1_2_features = physical_device_properties.apiVersion >= VK_API_VERSION_1_2;
 		if (use_1_2_features) {
@@ -819,6 +829,14 @@ Error RenderingDeviceDriverVulkan::_check_device_capabilities() {
 			pipeline_cache_control_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_CREATION_CACHE_CONTROL_FEATURES;
 			pipeline_cache_control_features.pNext = next_features;
 			next_features = &pipeline_cache_control_features;
+		}
+
+		if (enabled_device_extension_names.has(VK_KHR_PRESENT_ID_EXTENSION_NAME) && enabled_device_extension_names.has(VK_KHR_PRESENT_WAIT_EXTENSION_NAME)) {
+			present_id_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_ID_FEATURES_KHR;
+			present_id_features.pNext = next_features;
+			present_wait_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_WAIT_FEATURES_KHR;
+			present_wait_features.pNext = &present_id_features;
+			next_features = &present_wait_features;
 		}
 
 		VkPhysicalDeviceFeatures2 device_features_2 = {};
@@ -891,6 +909,8 @@ Error RenderingDeviceDriverVulkan::_check_device_capabilities() {
 		if (enabled_device_extension_names.has(VK_EXT_DEVICE_FAULT_EXTENSION_NAME)) {
 			device_fault_support = true;
 		}
+
+		present_wait_support = present_id_features.presentId && present_wait_features.presentWait;
 #if defined(VK_TRACK_DEVICE_MEMORY)
 		if (enabled_device_extension_names.has(VK_EXT_DEVICE_MEMORY_REPORT_EXTENSION_NAME)) {
 			device_memory_report_support = true;
@@ -1082,6 +1102,17 @@ Error RenderingDeviceDriverVulkan::_initialize_device(const LocalVector<VkDevice
 	}
 
 	void *create_info_next = nullptr;
+	VkPhysicalDevicePresentIdFeaturesKHR present_id_features = {};
+	VkPhysicalDevicePresentWaitFeaturesKHR present_wait_features = {};
+	if (present_wait_support) {
+		present_id_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_ID_FEATURES_KHR;
+		present_id_features.presentId = VK_TRUE;
+		present_wait_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_WAIT_FEATURES_KHR;
+		present_wait_features.pNext = &present_id_features;
+		present_wait_features.presentWait = VK_TRUE;
+		create_info_next = &present_wait_features;
+	}
+
 	VkPhysicalDeviceShaderFloat16Int8FeaturesKHR shader_features = {};
 	shader_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES_KHR;
 	shader_features.pNext = create_info_next;
@@ -1226,6 +1257,11 @@ Error RenderingDeviceDriverVulkan::_initialize_device(const LocalVector<VkDevice
 		device_functions.GetSwapchainImagesKHR = PFN_vkGetSwapchainImagesKHR(functions.GetDeviceProcAddr(vk_device, "vkGetSwapchainImagesKHR"));
 		device_functions.AcquireNextImageKHR = PFN_vkAcquireNextImageKHR(functions.GetDeviceProcAddr(vk_device, "vkAcquireNextImageKHR"));
 		device_functions.QueuePresentKHR = PFN_vkQueuePresentKHR(functions.GetDeviceProcAddr(vk_device, "vkQueuePresentKHR"));
+
+		if (present_wait_support) {
+			device_functions.WaitForPresentKHR = PFN_vkWaitForPresentKHR(functions.GetDeviceProcAddr(vk_device, "vkWaitForPresentKHR"));
+			present_wait_support = device_functions.WaitForPresentKHR != nullptr;
+		}
 
 		if (enabled_device_extension_names.has(VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME)) {
 			device_functions.CreateRenderPass2KHR = PFN_vkCreateRenderPass2KHR(functions.GetDeviceProcAddr(vk_device, "vkCreateRenderPass2KHR"));
@@ -2801,6 +2837,23 @@ Error RenderingDeviceDriverVulkan::command_queue_execute_and_present(CommandQueu
 
 		VkPresentInfoKHR present_info = {};
 		present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+
+		// Number the presents so swap_chain_free() can wait for the last one.
+		thread_local LocalVector<uint64_t> present_ids;
+		VkPresentIdKHR present_id_info = {};
+		if (present_wait_support) {
+			present_ids.clear();
+			for (uint32_t i = 0; i < p_swap_chains.size(); i++) {
+				SwapChain *swap_chain = (SwapChain *)(p_swap_chains[i].id);
+				present_ids.push_back(++swap_chain->present_id);
+			}
+
+			present_id_info.sType = VK_STRUCTURE_TYPE_PRESENT_ID_KHR;
+			present_id_info.swapchainCount = present_ids.size();
+			present_id_info.pPresentIds = present_ids.ptr();
+			present_info.pNext = &present_id_info;
+		}
+
 		present_info.waitSemaphoreCount = wait_semaphores.size();
 		present_info.pWaitSemaphores = wait_semaphores.ptr();
 		present_info.swapchainCount = swapchains.size();
@@ -3518,6 +3571,15 @@ void RenderingDeviceDriverVulkan::swap_chain_free(SwapChainID p_swap_chain) {
 	DEV_ASSERT(p_swap_chain.id != 0);
 
 	SwapChain *swap_chain = (SwapChain *)(p_swap_chain.id);
+	if (present_wait_support && swap_chain->vk_swapchain != VK_NULL_HANDLE && swap_chain->present_id > 0) {
+		// Waiting on the fences only covers rendering, not presentation. On NVIDIA (Windows), destroying a swap chain
+		// and its surface while its last present is still in flight can stop presentation on the other swap chains
+		// for good, so the main queue ends up waiting forever on an image that is never released. Let that present
+		// finish first. The timeout keeps a present that never completes from blocking the window from closing.
+		const uint64_t timeout_ns = 200'000'000;
+		device_functions.WaitForPresentKHR(vk_device, swap_chain->vk_swapchain, swap_chain->present_id, timeout_ns);
+	}
+
 	_swap_chain_release(swap_chain);
 
 	if (swap_chain->render_pass) {

@@ -118,6 +118,9 @@ class RenderingDeviceDriverVulkan : public RenderingDeviceDriver {
 
 		/// Debug device fault.
 		PFN_vkGetDeviceFaultInfoEXT GetDeviceFaultInfoEXT = nullptr;
+
+		/// Present wait, used before freeing a swap chain (see swap_chain_free()).
+		PFN_vkWaitForPresentKHR WaitForPresentKHR = nullptr;
 	};
 	// Debug marker extensions.
 	VkDebugReportObjectTypeEXT _convert_to_debug_report_objectType(VkObjectType p_object_type);
@@ -147,6 +150,7 @@ class RenderingDeviceDriverVulkan : public RenderingDeviceDriver {
 	bool vulkan_memory_model_device_scope_support = false;
 	bool pipeline_cache_control_support = false;
 	bool device_fault_support = false;
+	bool present_wait_support = false;
 #if defined(VK_TRACK_DEVICE_MEMORY)
 	bool device_memory_report_support = false;
 #endif
@@ -382,6 +386,7 @@ private:
 		RenderPassID render_pass;
 		int pre_transform_rotation_degrees = 0;
 		uint32_t image_index = 0;
+		uint64_t present_id = 0;
 #ifdef ANDROID_ENABLED
 		uint64_t refresh_duration = 0;
 #endif
