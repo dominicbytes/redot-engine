@@ -642,6 +642,7 @@ static GDExtensionVariantFromTypeConstructorFunc gdextension_get_variant_from_ty
 		case GDEXTENSION_VARIANT_TYPE_PACKED_COLOR_ARRAY:
 			return VariantTypeConstructor<PackedColorArray>::variant_from_type;
 		case GDEXTENSION_VARIANT_TYPE_STRUCT:
+			return VariantTypeConstructor<Struct>::variant_from_type;
 		case GDEXTENSION_VARIANT_TYPE_NIL:
 		case GDEXTENSION_VARIANT_TYPE_VARIANT_MAX:
 			ERR_FAIL_V_MSG(nullptr, "Getting Variant conversion function with invalid type");
@@ -728,6 +729,7 @@ static GDExtensionTypeFromVariantConstructorFunc gdextension_get_variant_to_type
 		case GDEXTENSION_VARIANT_TYPE_PACKED_COLOR_ARRAY:
 			return VariantTypeConstructor<PackedColorArray>::type_from_variant;
 		case GDEXTENSION_VARIANT_TYPE_STRUCT:
+			return VariantTypeConstructor<Struct>::type_from_variant;
 		case GDEXTENSION_VARIANT_TYPE_NIL:
 		case GDEXTENSION_VARIANT_TYPE_VARIANT_MAX:
 			ERR_FAIL_V_MSG(nullptr, "Getting Variant conversion function with invalid type");
