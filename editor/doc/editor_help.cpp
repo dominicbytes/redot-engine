@@ -3101,6 +3101,11 @@ void EditorHelp::_gen_doc_thread(void *p_udata) {
 }
 
 void EditorHelp::_gen_extensions_docs() {
+	// Deferred calls may still run after the documentation has been cleaned up.
+	if (_cleanup_in_progress.is_set() || !doc) {
+		return;
+	}
+
 	doc->generate((DocTools::GENERATE_FLAG_SKIP_BASIC_TYPES | DocTools::GENERATE_FLAG_EXTENSION_CLASSES_ONLY));
 
 	// Append extra doc data, as it gets overridden by the generation step.
