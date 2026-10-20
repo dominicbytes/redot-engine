@@ -134,6 +134,7 @@ class PhysicsDirectSpaceState2DExtension : public PhysicsDirectSpaceState2D {
 	GDCLASS(PhysicsDirectSpaceState2DExtension, PhysicsDirectSpaceState2D);
 
 	thread_local static const HashSet<RID> *exclude;
+	bool picking_query = false;
 
 protected:
 	static void _bind_methods();
@@ -156,8 +157,11 @@ public:
 	}
 	virtual int intersect_point(const PointParameters &p_parameters, ShapeResult *r_results, int p_result_max) override {
 		exclude = &p_parameters.exclude;
+		const bool previous_picking_query = picking_query;
+		picking_query = p_parameters.pick_point;
 		int ret = false;
 		GDVIRTUAL_CALL(_intersect_point, p_parameters.position, p_parameters.canvas_instance_id, p_parameters.collision_mask, p_parameters.collide_with_bodies, p_parameters.collide_with_areas, r_results, p_result_max, ret);
+		picking_query = previous_picking_query;
 		exclude = nullptr;
 		return ret;
 	}
@@ -189,6 +193,8 @@ public:
 		exclude = nullptr;
 		return ret;
 	}
+
+	bool is_picking_query() const { return picking_query; }
 
 	PhysicsDirectSpaceState2DExtension();
 };

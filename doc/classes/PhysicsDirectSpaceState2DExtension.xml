@@ -96,5 +96,12 @@
 			<description>
 			</description>
 		</method>
+		<method name="is_picking_query" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] while [method _intersect_point] is handling a viewport physics picking query. In that case, only input-pickable collision objects should be included in the results.
+				Returns [code]false[/code] for point queries made through [method PhysicsDirectSpaceState2D.intersect_point] and outside [method _intersect_point]. Nested point queries use their own picking context and restore the previous context when they return.
+			</description>
+		</method>
 	</methods>
 </class>

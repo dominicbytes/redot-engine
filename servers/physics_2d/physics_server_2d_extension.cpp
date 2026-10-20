@@ -45,6 +45,7 @@ bool PhysicsDirectSpaceState2DExtension::is_body_excluded_from_query(const RID &
 thread_local const HashSet<RID> *PhysicsDirectSpaceState2DExtension::exclude = nullptr;
 
 void PhysicsDirectSpaceState2DExtension::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("is_picking_query"), &PhysicsDirectSpaceState2DExtension::is_picking_query);
 	ClassDB::bind_method(D_METHOD("is_body_excluded_from_query", "body"), &PhysicsDirectSpaceState2DExtension::is_body_excluded_from_query);
 
 	GDVIRTUAL_BIND(_intersect_ray, "from", "to", "collision_mask", "collide_with_bodies", "collide_with_areas", "hit_from_inside", "result");
