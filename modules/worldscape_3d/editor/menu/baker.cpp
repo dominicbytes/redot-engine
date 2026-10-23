@@ -295,7 +295,7 @@ void Baker::set_up_navigation_popup() {
 	if (auto terrain = _plugin->get_terrain(); terrain) {
 		_bake_method = callable_mp(this, &Baker::set_up_navigation);
 		_confirm_dlg->set_text(SET_UP_NAVIGATION_DESCRIPTION);
-		EditorInterface::get_singleton()->popup_dialog_centered(_confirm_dlg);
+		_confirm_dlg->popup_centered();
 	}
 }
 
@@ -303,7 +303,7 @@ void Baker::popup(const String &descr, const Callable &method) {
 	if (auto terrain = _plugin->get_terrain(); terrain) {
 		_bake_method = method;
 		_bake_lod_dlg->set_description(descr);
-		EditorInterface::get_singleton()->popup_dialog_centered(_bake_lod_dlg);
+		_bake_lod_dlg->popup_centered();
 	}
 }
 
@@ -543,23 +543,12 @@ Baker::Baker(WorldScape3DEditorPlugin *plugin) :
 	_bake_lod_dlg = memnew(BakerLODDialog);
 	_bake_lod_dlg->hide();
 	_bake_lod_dlg->connect("confirmed", callable_mp(this, &Baker::on_confirm));
-	_bake_lod_dlg->set_unparent_when_invisible(true);
+	add_child(_bake_lod_dlg);
 
 	_confirm_dlg = memnew(ConfirmationDialog);
 	_confirm_dlg->hide();
 	_confirm_dlg->connect("confirmed", callable_mp(this, &Baker::on_confirm));
-	_confirm_dlg->set_unparent_when_invisible(true);
-}
-
-Baker::~Baker() {
-	if (_confirm_dlg && !_confirm_dlg->get_parent()) {
-		_confirm_dlg->queue_free();
-		_confirm_dlg = nullptr;
-	}
-	if (_bake_lod_dlg && !_bake_lod_dlg->get_parent()) {
-		_bake_lod_dlg->queue_free();
-		_bake_lod_dlg = nullptr;
-	}
+	add_child(_confirm_dlg);
 }
 
 Vector<WorldScape3D *> Baker::find_nav_region_terrains(NavigationRegion3D *nav_region) const {

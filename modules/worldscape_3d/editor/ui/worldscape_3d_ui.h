@@ -134,6 +134,7 @@ class WorldScape3DUI final : public Node {
 public:
 	explicit WorldScape3DUI(WorldScape3DEditorPlugin *plugin);
 	WorldScape3DUI() = default;
+	~WorldScape3DUI() override;
 
 	void on_visible_update();
 

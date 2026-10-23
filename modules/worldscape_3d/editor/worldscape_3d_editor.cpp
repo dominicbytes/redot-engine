@@ -1109,6 +1109,11 @@ void WorldScape3DEditorPlugin::_notification(int p_what) {
 	if (p_what == NOTIFICATION_POST_ENTER_TREE) {
 		init();
 		set_input_event_forwarding_always_enabled();
+	} else if (p_what == NOTIFICATION_PREDELETE) {
+		if (_ui) {
+			memdelete(_ui);
+			_ui = nullptr;
+		}
 	}
 }
 
